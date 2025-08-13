@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Internal SSRF Test Server</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .endpoint {
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 10px 0;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 Internal SSRF Test Server</h1>
+        
+        <div class="warning">
+            <strong>⚠️ Warning:</strong> This is an internal test server for SSRF vulnerability testing. 
+            It should only be accessible from within the Docker network.
+        </div>
+        
+        <h2>Available Test Endpoints:</h2>
+        
+        <div class="endpoint">
+            <strong>GET /</strong> - This page (HTML response)
+        </div>
+        
+        <div class="endpoint">
+            <strong>GET /secret.txt</strong> - Secret file for SSRF testing
+        </div>
+        
+        <div class="endpoint">
+            <strong>GET /admin.json</strong> - Admin data (JSON response)
+        </div>
+        
+        <div class="endpoint">
+            <strong>GET /health</strong> - Health check endpoint
+        </div>
+        
+        <h2>Server Information:</h2>
+        <ul>
+            <li><strong>Internal hostname:</strong> internal-server</li>
+            <li><strong>Internal port:</strong> 80</li>
+            <li><strong>External port:</strong> 8080 (for debugging only)</li>
+            <li><strong>Server time:</strong> <span id="time"></span></li>
+        </ul>
+        
+        <p><em>This server is designed to test SSRF vulnerabilities in the main application.</em></p>
+    </div>
+    
+    <script>
+        document.getElementById('time').textContent = new Date().toISOString();
+    </script>
+</body>
+</html>

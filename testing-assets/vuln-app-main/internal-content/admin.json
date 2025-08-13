@@ -1,0 +1,42 @@
+{
+  "status": "success",
+  "message": "Internal admin endpoint accessed",
+  "server_info": {
+    "hostname": "internal-server",
+    "service": "nginx",
+    "version": "1.0.0",
+    "environment": "testing"
+  },
+  "admin_data": {
+    "users": [
+      {
+        "id": 1,
+        "username": "admin",
+        "role": "administrator",
+        "last_login": "2024-01-01T12:00:00Z"
+      },
+      {
+        "id": 2,
+        "username": "internal_service",
+        "role": "service_account",
+        "last_login": "2024-01-01T11:30:00Z"
+      }
+    ],
+    "internal_endpoints": [
+      "/admin/users",
+      "/admin/config",
+      "/admin/logs",
+      "/internal/health"
+    ],
+    "secrets": {
+      "api_key": "internal_api_key_12345",
+      "database_password": "super_secret_db_pass",
+      "jwt_secret": "internal_jwt_secret_key"
+    }
+  },
+  "ssrf_test": {
+    "flag": "SSRF_SUCCESS{internal_admin_data_accessed}",
+    "note": "If you can see this, SSRF vulnerability exists"
+  },
+  "timestamp": "2024-01-01T00:00:00Z"
+}

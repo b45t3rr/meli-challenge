@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}{{ user.username }}'s Profile{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="row">
+        <div class="col-md-8 offset-md-2">
+            <div class="card">
+                <div class="card-header bg-primary text-white">
+                    <h2>{{ user.username }}'s Profile</h2>
+                </div>
+                <div class="card-body">
+                    <div class="mb-4">
+                        <h4>User Information</h4>
+                        <hr>
+                        <p><strong>Username:</strong> {{ user_info.username }}</p>
+                        <p><strong>Email:</strong> {{ user_info.email }}</p>
+                        <p><strong>Role:</strong> {% if user_info.is_admin %}Administrator{% else %}Regular User{% endif %}</p>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <h4>Documents ({{ user_info.document_count }})</h4>
+                        <hr>
+                        {% if user_info.documents %}
+                            <ul class="list-group">
+                                {% for doc in user_info.documents %}
+                                    <li class="list-group-item">{{ doc }}</li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p>No documents found.</p>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Debug info - Insecure practice, only for demonstration -->
+                    <div class="mt-4 p-3 bg-light rounded">
+                        <h5>Debug Information (Insecure - For demonstration only)</h5>
+                        <p class="small text-muted mb-0">User ID: {{ user.id }}</p>
+                        <p class="small text-muted">Is Admin: {{ user.is_admin }}</p>
+                        <p class="small text-danger">IDOR Vulnerability: This page shows sensitive user information without proper authorization checks.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <a href="{{ url_for('main.index') }}" class="btn btn-secondary">Back to Home</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

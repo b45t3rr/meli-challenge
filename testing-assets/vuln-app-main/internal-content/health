@@ -1,0 +1,6 @@
+OK - Internal SSRF Test Server is running
+Status: Healthy
+Service: nginx
+Hostname: internal-server
+Timestamp: 2024-01-01T00:00:00Z
+Purpose: SSRF vulnerability testing target

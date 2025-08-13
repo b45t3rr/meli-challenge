@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+      - uploads:/app/uploads
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=development
+      - SECRET_KEY=insecure_secret_key_123
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=insecure_password
+      - MYSQL_HOST=db
+      - MYSQL_DATABASE=vulnapp
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    # Initialize the database after the web service starts
+    command: >
+      sh -c "python init_db.py &&
+             gunicorn --bind 0.0.0.0:5000 --workers=4 --timeout=300 app:app"
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: insecure_password
+      MYSQL_DATABASE: vulnapp
+      MYSQL_USER: vulnuser
+      MYSQL_PASSWORD: vulnpass
+    volumes:
+      - db_data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Servidor interno para testear SSRF
+  internal-server:
+    image: nginx:alpine
+    volumes:
+      - ./internal-content:/usr/share/nginx/html:ro
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    environment:
+      - NGINX_HOST=internal-server
+      - NGINX_PORT=80
+    # Solo accesible internamente para pruebas de SSRF
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  db_data:
+  uploads:
