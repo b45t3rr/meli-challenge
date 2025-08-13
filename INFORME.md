@@ -14,7 +14,6 @@ El sistema implementa una arquitectura basada en **5 agentes especializados** qu
 2. **Static Agent**: Ejecuta análisis estático de código usando Semgrep
 3. **Dynamic Agent**: Realiza testing de penetración en vivo
 4. **Triage Agent**: Consolida resultados y determina estado final
-5. **Orchestration Agent**: Coordina la ejecución completa
 
 ### 1.2 Metodología ReAct
 
