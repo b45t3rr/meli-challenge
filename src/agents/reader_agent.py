@@ -3,6 +3,7 @@ from langchain_openai import ChatOpenAI
 from typing import Dict, Any, List
 
 from ..tools.pdf_tools import PDFReaderTool
+from ..tools.database_tools import DatabaseUpdateTool, DatabaseCreateTool, DatabaseQueryTool
 import logging
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,9 @@ class ReaderAgent:
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
         self.pdf_tool = PDFReaderTool()
+        self.db_update_tool = DatabaseUpdateTool()
+        self.db_create_tool = DatabaseCreateTool()
+        self.db_query_tool = DatabaseQueryTool()
         self.agent = self._create_agent()
     
     def _create_agent(self) -> Agent:
@@ -39,19 +43,29 @@ class ReaderAgent:
             """,
             verbose=True,
             allow_delegation=False,
-            tools=[self.pdf_tool],
+            tools=[self.pdf_tool, self.db_update_tool, self.db_create_tool, self.db_query_tool],
             llm=self.llm,
             max_iter=5,
             memory=True
         )
     
-    def process_report(self, pdf_path: str) -> Dict[str, Any]:
-        """Process a vulnerability report PDF"""
+    def process_report(self, pdf_path: str, db_manager=None, document_id=None) -> Dict[str, Any]:
+        """Process a vulnerability report PDF with incremental database updates"""
         logger.info(f"Processing PDF report: {pdf_path}")
         
         try:
             # Extract text from PDF
             raw_text = self.pdf_tool.extract_text(pdf_path)
+            
+            # Update database with initial PDF processing status
+            if db_manager and document_id:
+                initial_data = {
+                    "status": "processing_pdf",
+                    "pdf_extracted": True,
+                    "text_length": len(raw_text)
+                }
+                db_manager.update_assessment_stage(document_id, 'pdf_analysis', initial_data)
+                logger.info("Database updated: PDF text extracted")
             
             # Use LLM to interpret and structure the content
             prompt = f"""
@@ -115,7 +129,20 @@ class ReaderAgent:
             if json_match:
                 try:
                     structured_data = json.loads(json_match.group())
-                    logger.info(f"Successfully parsed {len(structured_data.get('vulnerabilities', []))} vulnerabilities")
+                    vulnerabilities = structured_data.get('vulnerabilities', [])
+                    logger.info(f"Successfully parsed {len(vulnerabilities)} vulnerabilities")
+                    
+                    # Update database with found vulnerabilities immediately
+                    if db_manager and document_id and vulnerabilities:
+                        vuln_data = {
+                            "status": "vulnerabilities_found",
+                            "vulnerabilities": vulnerabilities,
+                            "total_vulnerabilities": len(vulnerabilities),
+                            "report_metadata": structured_data.get('report_metadata', {})
+                        }
+                        db_manager.update_assessment_stage(document_id, 'pdf_analysis', vuln_data)
+                        logger.info(f"Database updated: Found {len(vulnerabilities)} vulnerabilities from PDF")
+                    
                     return structured_data
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse JSON: {e}")

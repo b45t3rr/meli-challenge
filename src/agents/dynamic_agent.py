@@ -9,6 +9,7 @@ import re
 from urllib.parse import urljoin, urlparse
 
 from ..tools.network_tools import NetworkTool
+from ..tools.database_tools import DatabaseUpdateTool, DatabaseCreateTool, DatabaseQueryTool
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,9 @@ class DynamicAgent:
     def __init__(self, llm: ChatOpenAI):
         self.llm = llm
         self.network_tool = NetworkTool()
+        self.db_update_tool = DatabaseUpdateTool()
+        self.db_create_tool = DatabaseCreateTool()
+        self.db_query_tool = DatabaseQueryTool()
         self.agent = self._create_agent()
         self.session = requests.Session()
         self.session.timeout = 30
@@ -50,13 +54,13 @@ class DynamicAgent:
             """,
             verbose=True,
             allow_delegation=False,
-            tools=[self.network_tool],
+            tools=[self.network_tool, self.db_update_tool, self.db_create_tool, self.db_query_tool],
             llm=self.llm,
             max_iter=15,
             memory=True
         )
     
-    def test_vulnerabilities(self, target_url: str, vulnerabilities: List[Dict] = None) -> Dict[str, Any]:
+    def test_vulnerabilities(self, target_url: str, vulnerabilities: List[Dict] = None, db_manager=None, document_id=None) -> Dict[str, Any]:
         """Test specific vulnerabilities from the report using exact mechanisms and payloads"""
         logger.info(f"Starting targeted vulnerability testing on: {target_url}")
         
@@ -69,11 +73,45 @@ class DynamicAgent:
             }
         
         try:
+            # Update database with testing start status
+            if db_manager and document_id:
+                start_data = {
+                    "status": "testing_started",
+                    "target_url": target_url,
+                    "vulnerabilities_to_test": len(vulnerabilities)
+                }
+                db_manager.update_assessment_stage(document_id, 'dynamic_analysis', start_data)
+                logger.info(f"Database updated: Started testing {len(vulnerabilities)} vulnerabilities")
+            
             # Test only the specific vulnerabilities from the report
             vulnerability_results = []
-            for vuln in vulnerabilities:
+            for i, vuln in enumerate(vulnerabilities):
                 result = self._test_specific_vulnerability(target_url, vuln)
                 vulnerability_results.append(result)
+                
+                # Update database with each test result immediately
+                if db_manager and document_id:
+                    test_data = {
+                        "status": "testing_in_progress",
+                        "completed_tests": i + 1,
+                        "total_tests": len(vulnerabilities),
+                        "latest_test_result": result,
+                        "exploitation_proofs": [r for r in vulnerability_results if r.get('dynamic_status') == 'Confirmed Vulnerable']
+                    }
+                    db_manager.update_assessment_stage(document_id, 'dynamic_analysis', test_data)
+                    logger.info(f"Database updated: Completed test {i+1}/{len(vulnerabilities)} for {vuln.get('id', 'unknown')}")
+            
+            # Final update with all results
+            if db_manager and document_id:
+                final_data = {
+                    "status": "testing_completed",
+                    "vulnerability_tests": vulnerability_results,
+                    "total_tested": len(vulnerability_results),
+                    "confirmed_vulnerabilities": len([r for r in vulnerability_results if r.get('dynamic_status') == 'Confirmed Vulnerable']),
+                    "target_url": target_url
+                }
+                db_manager.update_assessment_stage(document_id, 'dynamic_analysis', final_data)
+                logger.info("Database updated: Dynamic testing completed with exploitation results")
             
             return {
                 "target_url": target_url,
@@ -110,6 +148,59 @@ class DynamicAgent:
             method = vulnerability.get('method', 'GET').upper()
             payload = vulnerability.get('payload', vulnerability.get('exploit', ''))
             parameter = vulnerability.get('parameter', vulnerability.get('param', ''))
+            
+            # If basic fields are missing, try to extract from proof_of_concept or affected_components
+            if not endpoint or endpoint == '/':
+                # Try to get from affected_components
+                affected_components = vulnerability.get('affected_components', [])
+                if affected_components:
+                    endpoint = affected_components[0]
+                
+                # Try to extract from proof_of_concept
+                poc = vulnerability.get('proof_of_concept', '')
+                if poc and not endpoint:
+                    # Extract endpoint from HTTP request in PoC
+                    endpoint_match = re.search(r'(GET|POST|PUT|DELETE)\s+([^\s]+)', poc)
+                    if endpoint_match:
+                        method = endpoint_match.group(1)
+                        endpoint = endpoint_match.group(2)
+            
+            # Extract method from proof_of_concept if not found
+            if method == 'GET':
+                poc = vulnerability.get('proof_of_concept', '')
+                if 'POST' in poc:
+                    method = 'POST'
+                elif 'PUT' in poc:
+                    method = 'PUT'
+                elif 'DELETE' in poc:
+                    method = 'DELETE'
+            
+            # Extract payload from proof_of_concept if not found
+            if not payload:
+                poc = vulnerability.get('proof_of_concept', '')
+                if poc:
+                    # For GET requests, extract from URL parameters
+                    if method == 'GET' and '?' in poc:
+                        query_part = poc.split('?', 1)[1].split(' ')[0]
+                        payload = query_part
+                    # For POST requests, extract payload from body
+                    elif method == 'POST' and 'payload' in poc.lower():
+                        payload_match = re.search(r"payload[\s=:]+['\"]([^'\"]+)['\"]|with payload[\s=:]+['\"]([^'\"]+)['\"]|username=([^&\s]+)|password=([^&\s]+)", poc, re.IGNORECASE)
+                        if payload_match:
+                            payload = next(group for group in payload_match.groups() if group)
+                    # Extract common injection payloads
+                    elif any(injection in poc.lower() for injection in ["' or", "<script", "../", "http://"]):
+                        # Extract the actual malicious payload
+                        payload_patterns = [
+                             r"['\"]([^'\"]*(?:or|script|\.\.|\/)[^'\"]*)['\"]?",
+                             r"=([^&\s]*(?:or|script|\.\.|\/)[^&\s]*)",
+                             r"url=([^&\s]+)"
+                         ]
+                        for pattern in payload_patterns:
+                            match = re.search(pattern, poc, re.IGNORECASE)
+                            if match:
+                                payload = match.group(1)
+                                break
             
             # Create test attempt based on report details
             test_attempt = {
@@ -217,37 +308,11 @@ class DynamicAgent:
             response_text = response.text
             response_lower = response_text.lower()
             
-            # Check for specific indicators based on vulnerability type
-            vuln_type = vulnerability.get('type', '').lower()
-            
-            if 'xss' in vuln_type or 'cross-site scripting' in vuln_type:
-                if payload in response_text:
-                    attempt_result["success"] = True
-                    attempt_result["evidence"] = f"XSS payload '{payload}' reflected in response"
-            
-            elif 'sql' in vuln_type or 'injection' in vuln_type:
-                sql_errors = ['sql syntax', 'mysql', 'oracle', 'postgresql', 'sqlite', 'syntax error', 'database error']
-                for error in sql_errors:
-                    if error in response_lower:
-                        attempt_result["success"] = True
-                        attempt_result["evidence"] = f"SQL error detected: {error}"
-                        break
-            
-            elif 'command' in vuln_type or 'rce' in vuln_type:
-                command_indicators = ['uid=', 'gid=', 'root:', 'administrator', 'system32', '/bin/', '/usr/']
-                for indicator in command_indicators:
-                    if indicator in response_lower:
-                        attempt_result["success"] = True
-                        attempt_result["evidence"] = f"Command execution indicator: {indicator}"
-                        break
-            
-            elif 'directory' in vuln_type or 'path traversal' in vuln_type:
-                path_indicators = ['root:', '[drivers]', 'localhost', '/etc/passwd', 'windows\\system32']
-                for indicator in path_indicators:
-                    if indicator in response_lower:
-                        attempt_result["success"] = True
-                        attempt_result["evidence"] = f"Path traversal indicator: {indicator}"
-                        break
+            # Use LLM to analyze response for any type of vulnerability
+            success, evidence = self._analyze_vulnerability_response(response_text, payload, vulnerability)
+            if success:
+                attempt_result["success"] = True
+                attempt_result["evidence"] = evidence
             
             # Generic checks if no specific type matched
             if not attempt_result["success"]:
@@ -270,8 +335,84 @@ class DynamicAgent:
         
         return attempt_result
     
-    # Old test execution methods removed - replaced with _execute_reported_test
-    
-    # General testing methods removed - agent now focuses only on specific vulnerabilities from reports
-    
-    # All auxiliary methods removed - agent now focuses only on testing specific reported vulnerabilities
+    def _analyze_vulnerability_response(self, response_text: str, payload: str, vulnerability: Dict) -> tuple[bool, str]:
+        """Use LLM to analyze response for any type of vulnerability indicators"""
+        try:
+            vuln_type = vulnerability.get('type', 'Unknown')
+            vuln_description = vulnerability.get('description', '')
+            
+            analysis_prompt = f"""
+            Analyze this HTTP response to determine if the reported vulnerability was successfully exploited.
+            
+            Vulnerability Details:
+            - Type: {vuln_type}
+            - Description: {vuln_description}
+            - Payload used: {payload}
+            
+            HTTP Response (first 2000 chars): {response_text[:2000]}
+            
+            As a security expert, analyze the response for indicators that the vulnerability was successfully exploited.
+            Consider:
+            1. Error messages that reveal system information
+            2. Unexpected content or data disclosure
+            3. Reflected payloads or injected content
+            4. System command outputs
+            5. Database errors or information
+            6. File system access indicators
+            7. Any other signs specific to the vulnerability type
+            
+            IMPORTANT: Respond ONLY with valid JSON. Do NOT use markdown code blocks or any formatting. Return raw JSON only.
+            
+            Required JSON format:
+            {{
+                "vulnerable": true,
+                "evidence": "specific evidence found or explanation why not vulnerable",
+                "confidence": "high",
+                "vulnerability_type_detected": "detected type if different from reported"
+            }}
+            """
+            
+            response = self.llm.invoke(analysis_prompt)
+            
+            # Handle empty or malformed responses
+            if not response or not hasattr(response, 'content') or not response.content:
+                logger.warning("LLM returned empty response, using fallback analysis")
+                raise ValueError("Empty LLM response")
+            
+            response_content = response.content.strip()
+            if not response_content:
+                logger.warning("LLM returned empty content, using fallback analysis")
+                raise ValueError("Empty LLM content")
+            
+            # Try to parse JSON response
+            try:
+                result = json.loads(response_content)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse LLM response as JSON: {response_content[:200]}...")
+                # Try to extract JSON from response using regex
+                import re
+                json_match = re.search(r'\{.*\}', response_content, re.DOTALL)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group())
+                        logger.info("Successfully extracted JSON from LLM response")
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse extracted JSON from LLM response")
+                        raise ValueError("Invalid JSON in LLM response")
+                else:
+                    logger.warning("No JSON found in LLM response")
+                    raise ValueError("No JSON in LLM response")
+            
+            if result.get('vulnerable', False):
+                return True, result.get('evidence', 'Vulnerability indicators detected')
+            return False, result.get('evidence', 'No vulnerability indicators found')
+            
+        except Exception as e:
+            logger.error(f"LLM analysis failed for vulnerability analysis: {e}")
+            # Minimal fallback - just check for obvious error indicators
+            response_lower = response_text.lower()
+            error_indicators = ['error', 'exception', 'warning', 'failed', 'syntax', 'database', 'sql', 'uid=', 'root:', '/etc/', 'system32']
+            for indicator in error_indicators:
+                if indicator in response_lower:
+                    return True, f"Potential vulnerability indicator detected: {indicator}"
+            return False, 'No obvious vulnerability indicators found'

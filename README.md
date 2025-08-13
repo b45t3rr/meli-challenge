@@ -1,34 +1,36 @@
-# Vulnerability Validation Framework
+# 🛡️ Vulnerability Validation Framework
 
-> **Una solución GenAI utilizando CrewAI para validar vulnerabilidades mediante técnicas de análisis estático y dinámico.**
+> **🤖 Una solución GenAI utilizando CrewAI para validar vulnerabilidades mediante técnicas de análisis estático y dinámico.**
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
 [![CrewAI](https://img.shields.io/badge/CrewAI-Latest-green.svg)](https://crewai.com)
 [![Semgrep](https://img.shields.io/badge/Semgrep-Latest-yellow.svg)](https://semgrep.dev)
+[![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](Dockerfile)
 
-## Características
+## ✨ Características
 
-- **5 Agentes ReAct**: Lector, Estático, Dinámico, Triaje y orquestación
-- **Análisis Completo**: PDF parsing, análisis estático con Semgrep, testing dinámico
-- **Múltiples LLMs**: Soporte para OpenAI GPT, DeepSeek, xAI Grok, Anthropic Claude y Google Gemini
-- **Modos de Ejecución**: Análisis completo o agentes individuales
-- **Persistencia**: Almacenamiento en MongoDB
-- **CLI/API Ready**: Interfaz de línea de comandos con preparación para API
+- 🤖 **4 Agentes ReAct**: Lector, Estático, Dinámico, Triaje y orquestación
+- 📊 **Análisis Completo**: PDF parsing, análisis estático con Semgrep, testing dinámico
+- 🧠 **Múltiples LLMs**: Soporte para OpenAI GPT, DeepSeek, xAI Grok, Anthropic Claude y Google Gemini
+- ⚙️ **Modos de Ejecución**: Análisis completo o agentes individuales
+- 💾 **Persistencia**: Almacenamiento en MongoDB
+- 🚀 **CLI/API Ready**: Interfaz de línea de comandos con preparación para API
 
-## Instalación
+## 🚀 Instalación
 
-1. Clonar el repositorio:
+1. 📥 **Clonar el repositorio:**
 ```bash
 git clone <repository-url>
 cd vulnerability-validation
 ```
 
-2. Instalar dependencias:
+2. 📦 **Instalar dependencias:**
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Configurar variables de entorno:
+3. 🔑 **Configurar variables de entorno:**
 ```bash
 # Crear archivo .env (al menos una API key es requerida)
 echo "OPENAI_API_KEY=your_openai_api_key" >> .env
@@ -39,19 +41,40 @@ echo "GEMINI_API_KEY=your_gemini_api_key" >> .env
 echo "MONGODB_URI=mongodb://localhost:27017/" >> .env
 ```
 
-4. Instalar Semgrep:
+4. 🔍 **Instalar Semgrep:**
 ```bash
 pip install semgrep
 ```
 
-## Uso
+### 🐳 Instalación con Docker
 
-### Análisis Completo
+```bash
+# Construir la imagen
+docker build -t vulnerability-validation .
+
+# Ejecutar con Docker Compose
+docker-compose up -d
+
+# Ejecutar análisis
+docker run --rm -v $(pwd):/workspace vulnerability-validation \
+  python app.py --pdf /workspace/report.pdf --source /workspace/vuln-app/
+```
+
+## 💻 Uso
+
+### 🚀 Inicio Rápido
+
+```bash
+# Análisis completo con configuración mínima
+python app.py --pdf report.pdf --source vuln-app/ --url http://localhost/
+```
+
+### 🔄 Análisis Completo
 ```bash
 python app.py --pdf report.pdf --source vuln-app/ --url http://localhost/
 ```
 
-### Especificar Modelo LLM
+### 🧠 Especificar Modelo LLM
 ```bash
 # OpenAI GPT
 python app.py --pdf report.pdf --source vuln-app/ --url http://localhost/ --model gpt-4o-mini
@@ -69,37 +92,37 @@ python app.py --pdf report.pdf --source vuln-app/ --url http://localhost/ --mode
 python app.py --pdf report.pdf --source vuln-app/ --url http://localhost/ --model gemini-1.5-pro
 ```
 
-### Modelos Soportados
+### 🎯 Modelos Soportados
 
-#### OpenAI
+#### 🟢 OpenAI
 - `gpt-4o`, `gpt-4o-mini`
 - `gpt-4-turbo`, `gpt-4`
 - `gpt-3.5-turbo`
 - `o1-preview`, `o1-mini`
 
-#### DeepSeek
+#### 🔵 DeepSeek
 - `deepseek-chat`
 - `deepseek-coder`
 
-#### xAI (Grok)
+#### ⚡ xAI (Grok)
 - `grok-beta`
 - `grok-vision-beta`
 
-#### Anthropic Claude
+#### 🟣 Anthropic Claude
 - `claude-3-5-sonnet-20241022`
 - `claude-3-5-haiku-20241022`
 - `claude-3-opus-20240229`
 - `claude-3-sonnet-20240229`
 - `claude-3-haiku-20240307`
 
-#### Google Gemini
+#### 🔴 Google Gemini
 - `gemini-1.5-pro`
 - `gemini-1.5-flash`
 - `gemini-1.0-pro`
 
 
 
-### Ejecutar Solo un Agente
+### 🎯 Ejecutar Solo un Agente
 ```bash
 # Solo análisis de PDF
 python app.py --pdf report.pdf --only-read
@@ -111,42 +134,44 @@ python app.py --source vuln-app/ --only-static
 python app.py --url http://localhost/ --only-dynamic
 ```
 
-### Opciones Disponibles
+### ⚙️ Opciones Disponibles
 
-- `--pdf`: Ruta al archivo PDF del reporte de vulnerabilidades
-- `--source`: Directorio del código fuente para análisis estático
-- `--url`: URL objetivo para testing dinámico
-- `--model`: Modelo LLM a utilizar (default: gpt-4o-mini)
-- `--only-read`: Ejecutar solo el agente lector
-- `--only-static`: Ejecutar solo el agente de análisis estático
-- `--only-dynamic`: Ejecutar solo el agente de testing dinámico
-- `--output`: Archivo de salida para guardar resultados (opcional)
+| Parámetro | Descripción | Ejemplo |
+|-----------|-------------|----------|
+| 📄 `--pdf` | Ruta al archivo PDF del reporte | `report.pdf` |
+| 📁 `--source` | Directorio del código fuente | `vuln-app/` |
+| 🌐 `--url` | URL objetivo para testing dinámico | `http://localhost/` |
+| 🧠 `--model` | Modelo LLM a utilizar | `gpt-4o-mini` |
+| 📖 `--only-read` | Ejecutar solo el agente lector | - |
+| 🔍 `--only-static` | Ejecutar solo análisis estático | - |
+| ⚡ `--only-dynamic` | Ejecutar solo testing dinámico | - |
+| 💾 `--output` | Archivo de salida (opcional) | `results.json` |
 
-## Arquitectura
+## 🏗️ Arquitectura
 
-### Agentes
+### 🤖 Agentes
 
-1. **Reader Agent**: Extrae y estructura información de reportes PDF
-2. **Static Agent**: Ejecuta Semgrep y analiza código fuente
-3. **Dynamic Agent**: Realiza testing de penetración en vivo
-4. **Triage Agent**: Consolida resultados y determina estado final
+1. 📖 **Reader Agent**: Extrae y estructura información de reportes PDF
+2. 🔍 **Static Agent**: Ejecuta Semgrep y analiza código fuente
+3. ⚡ **Dynamic Agent**: Realiza testing de penetración en vivo
+4. 🎯 **Triage Agent**: Consolida resultados y determina estado final
 
-### Metodología ReAct
+### 🔄 Metodología ReAct
 
 Cada agente sigue el patrón Reasoning and Action:
-- **REASON**: Analiza el contexto y planifica acciones
-- **ACT**: Ejecuta herramientas y recopila información
-- **REASON**: Evalúa resultados y determina próximos pasos
+- 🧠 **REASON**: Analiza el contexto y planifica acciones
+- ⚡ **ACT**: Ejecuta herramientas y recopila información
+- 🔄 **REASON**: Evalúa resultados y determina próximos pasos
 
-### Estados de Vulnerabilidad
+### 🚨 Estados de Vulnerabilidad
 
-- **Vulnerable**: Confirmado por testing dinámico o evidencia estática fuerte
-- **Not Vulnerable**: Sin evidencia creíble en ningún análisis
-- **Possible**: Solo evidencia estática sin confirmación dinámica (solo para agente estático)
+- 🔴 **Vulnerable**: Confirmado por testing dinámico o evidencia estática fuerte
+- 🟢 **Not Vulnerable**: Sin evidencia creíble en ningún análisis
+- 🟡 **Possible**: Solo evidencia estática sin confirmación dinámica (solo para agente estático)
 
-## Configuración
+## ⚙️ Configuración
 
-### Variables de Entorno
+### 🔑 Variables de Entorno
 
 ```bash
 # API Keys
@@ -160,7 +185,7 @@ MONGODB_URI=mongodb://localhost:27017/
 LOG_LEVEL=INFO
 ```
 
-### MongoDB
+### 💾 MongoDB
 
 Los resultados se almacenan en MongoDB con la siguiente estructura:
 ```json
@@ -180,41 +205,44 @@ Los resultados se almacenan en MongoDB con la siguiente estructura:
 }
 ```
 
-## Herramientas Incluidas
+## 🛠️ Herramientas Incluidas
 
-### PDF Tools
+### 📄 PDF Tools
 - Extracción de texto completo
 - Metadatos del documento
 - Procesamiento por páginas
 
-### File Tools
+### 📁 File Tools
 - Lectura de archivos de código
 - Listado recursivo de directorios
 - Búsqueda de archivos por patrón
 
-### Network Tools
+### 🌐 Network Tools
 - Solicitudes HTTP personalizadas
 - Escaneo de puertos
 - Ejecución de comandos de red
 - Web crawling y descubrimiento
 
-## Desarrollo
+## 👨‍💻 Desarrollo
 
-### Estructura del Proyecto
+### 📁 Estructura del Proyecto
 ```
-.
-├── app.py                 # Punto de entrada CLI
-├── requirements.txt       # Dependencias
-├── src/
-│   ├── crew.py           # Orquestador CrewAI
-│   ├── agents/           # Definiciones de agentes
-│   ├── tasks/            # Definiciones de tareas
-│   ├── tools/            # Herramientas para agentes
-│   └── utils/            # Utilidades (DB, config)
-└── README.md
+📦 vulnerability-validation/
+├── 🚀 app.py                 # Punto de entrada CLI
+├── 📋 requirements.txt       # Dependencias Python
+├── 🐳 Dockerfile            # Configuración Docker
+├── 🔧 docker-compose.yml    # Orquestación de servicios
+├── 📁 src/
+│   ├── 🎭 crew.py           # Orquestador CrewAI
+│   ├── 🤖 agents/           # Definiciones de agentes
+│   ├── 📋 tasks/            # Definiciones de tareas
+│   ├── 🛠️ tools/            # Herramientas para agentes
+│   └── ⚙️ utils/            # Utilidades (DB, config)
+├── 🧪 testing-assets/       # Recursos de prueba
+└── 📖 README.md
 ```
 
-### Agregar Nuevos Agentes
+### ➕ Agregar Nuevos Agentes
 
 1. Crear clase de agente en `src/agents/`
 2. Implementar metodología ReAct
@@ -222,18 +250,18 @@ Los resultados se almacenan en MongoDB con la siguiente estructura:
 4. Agregar tarea correspondiente en `src/tasks/`
 5. Integrar en `src/crew.py`
 
-### Agregar Nuevas Herramientas
+### 🔧 Agregar Nuevas Herramientas
 
 1. Crear herramienta en `src/tools/`
 2. Heredar de `BaseTool` de CrewAI
 3. Implementar método `_run()`
 4. Agregar a agente correspondiente
 
-## Troubleshooting
+## 🔧 Troubleshooting
 
-### Errores Comunes
+### ⚠️ Errores Comunes
 
-1. **API Key no configurada**:
+1. 🔑 **API Key no configurada**:
    ```
    Error: No API keys configured
    ```
@@ -244,32 +272,42 @@ Los resultados se almacenan en MongoDB con la siguiente estructura:
    - `ANTHROPIC_API_KEY` para modelos Anthropic Claude
    - `GEMINI_API_KEY` para modelos Google Gemini
 
-2. **MongoDB no disponible**:
+2. 💾 **MongoDB no disponible**:
    ```
    Warning: Database connection failed
    ```
    Solución: Los resultados se guardarán solo en archivo
 
-3. **Semgrep no encontrado**:
+3. 🔍 **Semgrep no encontrado**:
    ```
    Error: semgrep command not found
    ```
    Solución: `pip install semgrep`
 
-### Logs
+### 📝 Logs
 
 Los logs se guardan en `vulnerability_validation.log` y se muestran en consola.
 
-## Licencia
+## 📄 Licencia
 
 MIT License
 
-## Contribuciones
+## 🤝 Contribuciones
 
 Las contribuciones son bienvenidas. Por favor:
 
-1. Fork el repositorio
-2. Crear rama feature
-3. Commit cambios
-4. Push a la rama
-5. Crear Pull Request
+1. 🍴 Fork el repositorio
+2. 🌿 Crear rama feature (`git checkout -b feature/nueva-funcionalidad`)
+3. 💾 Commit cambios (`git commit -am 'Agregar nueva funcionalidad'`)
+4. 📤 Push a la rama (`git push origin feature/nueva-funcionalidad`)
+5. 🔄 Crear Pull Request
+
+---
+
+<div align="center">
+
+**🛡️ Desarrollado con ❤️ para la seguridad de aplicaciones**
+
+[⭐ Dale una estrella](https://github.com/tu-usuario/vulnerability-validation) • [🐛 Reportar Bug](https://github.com/tu-usuario/vulnerability-validation/issues) • [💡 Solicitar Feature](https://github.com/tu-usuario/vulnerability-validation/issues)
+
+</div>

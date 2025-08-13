@@ -5,6 +5,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from typing import Dict, Any, Optional, Union
 import os
+from datetime import datetime
 
 from .agents.reader_agent import ReaderAgent
 from .agents.static_agent import StaticAgent
@@ -18,10 +19,13 @@ logger = logging.getLogger(__name__)
 class VulnerabilityValidationCrew:
     """Main crew orchestrator for vulnerability validation"""
     
-    def __init__(self, model: str = "gpt-4o-mini", verbose: bool = False, language: str = "en"):
+    def __init__(self, model: str = "gpt-4o-mini", verbose: bool = False, language: str = "en", 
+                 document_id: str = None, db_manager = None):
         self.model = model
         self.verbose = verbose
         self.language = language
+        self.document_id = document_id
+        self.db_manager = db_manager
         self.llm = self._setup_llm()
         
         # Initialize agents
@@ -116,7 +120,7 @@ class VulnerabilityValidationCrew:
         # Create crew with only reader agent
         crew = Crew(
             agents=[self.reader_agent.agent],
-            tasks=[self.tasks.create_read_task(self.reader_agent.agent, pdf_path)],
+            tasks=[self.tasks.create_read_task(self.reader_agent.agent, pdf_path, self.document_id)],
             process=Process.sequential,
             verbose=self.verbose
         )
@@ -134,7 +138,7 @@ class VulnerabilityValidationCrew:
         
         crew = Crew(
             agents=[self.static_agent.agent],
-            tasks=[self.tasks.create_static_task(self.static_agent.agent, source_path)],
+            tasks=[self.tasks.create_static_task(self.static_agent.agent, source_path, self.document_id)],
             process=Process.sequential,
             verbose=self.verbose
         )
@@ -152,7 +156,7 @@ class VulnerabilityValidationCrew:
         
         crew = Crew(
             agents=[self.dynamic_agent.agent],
-            tasks=[self.tasks.create_dynamic_task(self.dynamic_agent.agent, target_url)],
+            tasks=[self.tasks.create_dynamic_task(self.dynamic_agent.agent, target_url, self.document_id)],
             process=Process.sequential,
             verbose=self.verbose
         )
@@ -165,29 +169,34 @@ class VulnerabilityValidationCrew:
         }
     
     def _execute_full_analysis(self, pdf_path: str, source_path: str, target_url: str) -> Dict[str, Any]:
-        """Execute full analysis with all agents"""
-        logger.info("Executing full analysis with all agents")
+        """Execute full analysis with CrewAI interface showing visual progress"""
+        logger.info("Executing full analysis with CrewAI interface")
         
-        # Create all tasks
-        read_task = self.tasks.create_read_task(self.reader_agent.agent, pdf_path)
-        static_task = self.tasks.create_static_task(self.static_agent.agent, source_path)
-        dynamic_task = self.tasks.create_dynamic_task(self.dynamic_agent.agent, target_url)
-        triage_task = self.tasks.create_triage_task(
-            self.triage_agent.agent,
-            [read_task, static_task, dynamic_task],
-            language=self.language
-        )
+        # Create database document if not exists
+        if not self.document_id and self.db_manager:
+            self.document_id = self.db_manager.create_assessment_document(
+                pdf_path=pdf_path,
+                source_path=source_path,
+                target_url=target_url,
+                model_used=self.model,
+                execution_mode="full"
+            )
+            logger.info(f"Created assessment document: {self.document_id}")
         
-        # Set task dependencies
-        static_task.context = [read_task]
-        dynamic_task.context = [read_task]
-        triage_task.context = [read_task, static_task, dynamic_task]
+        # Create tasks with dependencies and document_id
+        read_task = self.tasks.create_read_task(self.reader_agent.agent, pdf_path, self.document_id)
         
-        # Create crew
+        static_task = self.tasks.create_static_task(self.static_agent.agent, source_path, self.document_id)
+        
+        dynamic_task = self.tasks.create_dynamic_task(self.dynamic_agent.agent, target_url, self.document_id)
+        
+        triage_task = self.tasks.create_triage_task(self.triage_agent.agent, [read_task, static_task, dynamic_task], self.language, self.document_id)
+        
+        # Create crew with all agents and tasks
         crew = Crew(
             agents=[
                 self.reader_agent.agent,
-                self.static_agent.agent,
+                self.static_agent.agent, 
                 self.dynamic_agent.agent,
                 self.triage_agent.agent
             ],
@@ -196,70 +205,12 @@ class VulnerabilityValidationCrew:
             verbose=self.verbose
         )
         
+        # Execute the crew with visual interface
         result = crew.kickoff()
-        
-        # Extract individual agent results from crew output
-        pdf_analysis = None
-        static_analysis = None
-        dynamic_analysis = None
-        
-        if hasattr(result, 'tasks_output') and result.tasks_output:
-            for i, task_output in enumerate(result.tasks_output):
-                if i == 0:  # Reader task
-                    pdf_analysis = task_output.json_dict if hasattr(task_output, 'json_dict') else str(task_output.raw)
-                elif i == 1:  # Static task
-                    static_analysis = task_output.json_dict if hasattr(task_output, 'json_dict') else str(task_output.raw)
-                elif i == 2:  # Dynamic task
-                    dynamic_analysis = task_output.json_dict if hasattr(task_output, 'json_dict') else str(task_output.raw)
-        
-        # Execute triage agent directly to get structured result
-        structured_triage_result = None
-        try:
-            if pdf_analysis and static_analysis and dynamic_analysis:
-                structured_triage_result = self.triage_agent.triage_vulnerabilities(
-                    pdf_analysis=pdf_analysis,
-                    static_analysis=static_analysis,
-                    dynamic_analysis=dynamic_analysis
-                )
-                logger.info("Successfully executed triage agent directly")
-        except Exception as e:
-            logger.error(f"Direct triage execution failed: {e}")
-        
-        # Extract triage results from CrewAI output as fallback
-        crew_triage_result = None
-        if hasattr(result, 'tasks_output') and result.tasks_output:
-            # The triage task is the last one (index 3)
-            for task_output in result.tasks_output:
-                if hasattr(task_output, 'agent') and 'triage' in str(task_output.agent).lower():
-                    crew_triage_result = {
-                        'raw_output': str(task_output.raw) if hasattr(task_output, 'raw') else None,
-                        'json_dict': task_output.json_dict if hasattr(task_output, 'json_dict') else None,
-                        'pydantic_output': task_output.pydantic_output if hasattr(task_output, 'pydantic_output') else None
-                    }
-                    break
-        
-        # If triage result not found in tasks_output, try to extract from main result
-        if not crew_triage_result and hasattr(result, 'raw'):
-            crew_triage_result = {
-                'raw_output': str(result.raw),
-                'json_dict': result.json_dict if hasattr(result, 'json_dict') else None,
-                'pydantic_output': result.pydantic_output if hasattr(result, 'pydantic_output') else None
-            }
-        
-        # Extract vulnerabilities from structured triage result for main access
-        vulnerabilities = []
-        if structured_triage_result and 'vulnerability_triage' in structured_triage_result:
-            vulnerabilities = structured_triage_result['vulnerability_triage']
         
         return {
             "mode": "full",
-            "final_result": result,
-            "triage_analysis": crew_triage_result,
-            "structured_triage_result": structured_triage_result,  # This contains the vulnerabilities with technical evidence
-            "vulnerabilities": vulnerabilities,  # Main vulnerabilities field with technical evidence
-            "pdf_analysis": pdf_analysis,
-            "static_analysis": static_analysis,
-            "dynamic_analysis": dynamic_analysis,
+            "crew_result": result,
             "timestamp": self._get_timestamp(),
             "pdf_path": pdf_path,
             "source_path": source_path,

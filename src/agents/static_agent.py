@@ -6,6 +6,7 @@ import subprocess
 import os
 
 from ..tools.file_tools import FileReaderTool, SemgrepTool
+from ..tools.database_tools import DatabaseUpdateTool, DatabaseCreateTool, DatabaseQueryTool
 import logging
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,9 @@ class StaticAgent:
         self.llm = llm
         self.file_tool = FileReaderTool()
         self.semgrep_tool = SemgrepTool()
+        self.db_update_tool = DatabaseUpdateTool()
+        self.db_create_tool = DatabaseCreateTool()
+        self.db_query_tool = DatabaseQueryTool()
         self.agent = self._create_agent()
     
     def _create_agent(self) -> Agent:
@@ -45,13 +49,13 @@ class StaticAgent:
             """,
             verbose=True,
             allow_delegation=False,
-            tools=[self.file_tool, self.semgrep_tool],
+            tools=[self.file_tool, self.semgrep_tool, self.db_update_tool, self.db_create_tool, self.db_query_tool],
             llm=self.llm,
             max_iter=10,
             memory=True
         )
     
-    def analyze_code(self, source_path: str, vulnerabilities: List[Dict] = None) -> Dict[str, Any]:
+    def analyze_code(self, source_path: str, vulnerabilities: List[Dict] = None, db_manager=None, document_id=None) -> Dict[str, Any]:
         """Perform static analysis on the source code"""
         logger.info(f"Starting static analysis on: {source_path}")
         
@@ -59,8 +63,29 @@ class StaticAgent:
             # Step 1: Run Semgrep scan
             semgrep_results = self._run_semgrep_scan(source_path)
             
+            # Update database with Semgrep results
+            if db_manager and document_id:
+                semgrep_data = {
+                    "status": "semgrep_completed",
+                    "semgrep_findings": len(semgrep_results.get('results', [])),
+                    "semgrep_results": semgrep_results
+                }
+                db_manager.update_assessment_stage(document_id, 'static_analysis', semgrep_data)
+                logger.info(f"Database updated: Semgrep found {len(semgrep_results.get('results', []))} issues")
+            
             # Step 2: Analyze results with LLM
             analysis_result = self._analyze_with_llm(semgrep_results, vulnerabilities, source_path)
+            
+            # Update database with code analysis and evidence
+            if db_manager and document_id:
+                analysis_data = {
+                    "status": "analysis_completed",
+                    "vulnerability_analysis": analysis_result,
+                    "code_evidence": analysis_result.get('vulnerability_assessments', []),
+                    "source_path": source_path
+                }
+                db_manager.update_assessment_stage(document_id, 'static_analysis', analysis_data)
+                logger.info("Database updated: Static analysis completed with code evidence")
             
             return {
                 "semgrep_results": semgrep_results,
@@ -260,26 +285,48 @@ class StaticAgent:
         return relevant_files
     
     def _analyze_file_content(self, content: str, vulnerability: Dict, file_path: str) -> str:
-        """Analyze specific file content for vulnerability patterns"""
-        vuln_type = vulnerability.get('type', '').lower()
-        
-        # Simple pattern matching based on vulnerability type
-        patterns = {
-            'xss': ['innerHTML', 'document.write', 'eval(', 'dangerouslySetInnerHTML'],
-            'sql': ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'query(', 'execute('],
-            'csrf': ['@csrf_exempt', 'csrf_token', 'X-CSRFToken'],
-            'lfi': ['include(', 'require(', 'file_get_contents', 'readfile'],
-            'rce': ['exec(', 'system(', 'shell_exec', 'eval(', 'subprocess']
-        }
-        
-        findings = []
-        for pattern_type, pattern_list in patterns.items():
-            if pattern_type in vuln_type:
-                for pattern in pattern_list:
-                    if pattern in content:
-                        findings.append(f"Found {pattern} pattern")
-        
-        return "; ".join(findings) if findings else "No obvious patterns found"
+        """Analyze specific file content for vulnerability patterns using LLM"""
+        try:
+            vuln_type = vulnerability.get('type', 'Unknown')
+            vuln_description = vulnerability.get('description', '')
+            
+            # Limit content size for LLM analysis
+            content_preview = content[:3000] if len(content) > 3000 else content
+            
+            analysis_prompt = f"""
+            As a security code reviewer, analyze this source code file for the specific vulnerability.
+            
+            File: {file_path}
+            Vulnerability Type: {vuln_type}
+            Vulnerability Description: {vuln_description}
+            
+            Source Code (first 3000 chars):
+            ```
+            {content_preview}
+            ```
+            
+            Analyze the code for:
+            1. Vulnerable patterns related to the specific vulnerability type
+            2. Input validation issues
+            3. Unsafe function usage
+            4. Missing security controls
+            5. Data flow that could lead to exploitation
+            
+            Focus specifically on finding evidence of the reported vulnerability type.
+            
+            Respond with a concise analysis (max 200 chars) describing what you found or didn't find.
+            """
+            
+            response = self.llm.invoke(analysis_prompt)
+            return response.content.strip()[:200]  # Limit response length
+            
+        except Exception as e:
+            logger.error(f"LLM file analysis failed: {e}")
+            # Minimal fallback
+            vuln_type = vulnerability.get('type', '').lower()
+            basic_patterns = ['eval(', 'exec(', 'system(', 'query(', 'innerHTML', 'document.write']
+            found_patterns = [pattern for pattern in basic_patterns if pattern in content]
+            return f"Found patterns: {', '.join(found_patterns)}" if found_patterns else "No obvious patterns found"
     
     def _create_fallback_analysis(self, semgrep_results: Dict) -> Dict[str, Any]:
         """Create fallback analysis when LLM parsing fails"""

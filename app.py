@@ -15,6 +15,10 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.table import Table
+from rich.text import Text
+from rich.columns import Columns
+from rich.align import Align
 
 from src.crew import VulnerabilityValidationCrew
 from src.utils.database import DatabaseManager
@@ -24,7 +28,6 @@ import logging
 load_dotenv()
 
 console = Console()
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def extract_zip_to_temp(zip_path):
@@ -47,6 +50,8 @@ def cleanup_temp_directory(temp_dir):
     except Exception as e:
         console.print(f"[yellow]⚠[/yellow] Failed to clean up temporary directory: {e}")
 
+
+
 @click.command()
 @click.option('--pdf', required=True, help='Path to the vulnerability report PDF')
 @click.option('--source', help='Path to the source code directory')
@@ -60,6 +65,12 @@ def cleanup_temp_directory(temp_dir):
 @click.option('--lang', default='en', help='Language for the final result (e.g., es for Spanish, en for English)')
 def main(pdf, source, url, model, only_read, only_static, only_dynamic, verbose, output, lang):
     """GenIA - Vulnerability Validation System using CrewAI"""
+    
+    # Configure logging based on verbose flag
+    if verbose:
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    else:
+        logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
     # Validate inputs
     if not Path(pdf).exists():
@@ -119,14 +130,7 @@ def main(pdf, source, url, model, only_read, only_static, only_dynamic, verbose,
         console.print(f"[red]✗[/red] Database initialization failed: {e}")
         sys.exit(1)
     
-    # Initialize crew
-    crew = VulnerabilityValidationCrew(
-        model=model,
-        verbose=verbose,
-        language=lang
-    )
-    
-    # Determine execution mode
+    # Determine execution mode first
     if only_read:
         mode = "reader"
     elif only_static:
@@ -135,6 +139,38 @@ def main(pdf, source, url, model, only_read, only_static, only_dynamic, verbose,
         mode = "dynamic"
     else:
         mode = "full"
+    
+    # Create initial assessment document in database
+    document_id = None
+    try:
+        logger.info(f"Creating assessment document with: pdf={pdf}, source={original_source if temp_dir else source}, url={url}, model={model}, mode={mode}")
+        document_id = db_manager.create_assessment_document(
+            pdf_path=pdf,
+            source_path=original_source if temp_dir else source,
+            target_url=url,
+            model_used=model,
+            execution_mode=mode
+        )
+        if document_id:
+            logger.info(f"Assessment document created successfully with ID: {document_id}")
+            console.print(f"[green]✓[/green] Assessment document created with ID: {document_id}")
+        else:
+            logger.error("create_assessment_document returned None")
+            console.print(f"[yellow]⚠[/yellow] Failed to create initial document: create_assessment_document returned None")
+    except Exception as e:
+        logger.error(f"Exception during document creation: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        console.print(f"[yellow]⚠[/yellow] Failed to create initial document: {e}")
+    
+    # Initialize crew with database tracking
+    crew = VulnerabilityValidationCrew(
+        model=model,
+        verbose=verbose,
+        language=lang,
+        document_id=document_id,
+        db_manager=db_manager
+    )
     
     console.print(f"[cyan]Execution mode:[/cyan] {mode}")
     console.print(f"[cyan]Model:[/cyan] {model}")
@@ -160,48 +196,27 @@ def main(pdf, source, url, model, only_read, only_static, only_dynamic, verbose,
             
             progress.update(task, description="Saving results to database...")
             
-            # Save complete result to database (only one record)
-            result_id = db_manager.save_assessment_result(
-                result=result,
-                pdf_path=pdf,
-                source_path=original_source if temp_dir else source,
-                target_url=url,
-                model_used=model,
-                execution_mode=mode
-            )
+            # Complete the assessment in the database
+            if document_id:
+                try:
+                    db_manager.complete_assessment(document_id, result)
+                    result_id = document_id
+                    logger.info(f"Successfully completed assessment with ID: {result_id}")
+                    console.print(f"[green]✓[/green] Assessment completed and saved with ID: {result_id}")
+                except Exception as e:
+                    logger.error(f"Failed to complete assessment: {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    console.print(f"[red]✗[/red] Failed to complete assessment: {e}")
+                    result_id = None
+            else:
+                logger.error("No document ID available - assessment creation failed")
+                console.print(f"[red]✗[/red] Assessment creation failed - no document ID available")
+                result_id = None
             
             progress.update(task, description="Analysis complete!")
         
-        # Display results
-        console.print("\n[bold green]Analysis Complete![/bold green]")
-        console.print(f"[cyan]Result ID:[/cyan] {result_id}")
-        
-        # Display summary
-        vulnerabilities = []
-        
-        # Try to get vulnerabilities from structured_triage_result first (contains technical evidence)
-        if 'structured_triage_result' in result and result['structured_triage_result']:
-            if 'vulnerability_triage' in result['structured_triage_result']:
-                vulnerabilities = result['structured_triage_result']['vulnerability_triage']
-                console.print("[green]✓[/green] Using structured triage result with technical evidence")
-        # Fallback to direct vulnerabilities field
-        elif 'vulnerabilities' in result:
-            vulnerabilities = result['vulnerabilities']
-            console.print("[yellow]⚠[/yellow] Using fallback vulnerability data")
-        
-        if vulnerabilities:
-            total_vulns = len(vulnerabilities)
-            vulnerable_count = sum(1 for v in vulnerabilities if v.get('final_status') == 'Vulnerable')
-            console.print(f"[cyan]Total vulnerabilities analyzed:[/cyan] {total_vulns}")
-            console.print(f"[red]Confirmed vulnerable:[/red] {vulnerable_count}")
-            console.print(f"[green]Not vulnerable:[/green] {total_vulns - vulnerable_count}")
-            
-            # Display proof-of-concept information for vulnerable findings
-            vulnerable_with_poc = [v for v in vulnerabilities if v.get('final_status') == 'Vulnerable' and v.get('technical_evidence', {}).get('proof_of_concept')]
-            if vulnerable_with_poc:
-                console.print(f"[cyan]Vulnerabilities with proof-of-concept:[/cyan] {len(vulnerable_with_poc)}")
-                for vuln in vulnerable_with_poc:
-                    console.print(f"  • {vuln.get('title', vuln.get('vulnerability_id', 'Unknown'))} - PoC available")
+        # Analysis completed - results saved to database
         
         # Save to file if requested
         if output:

@@ -124,15 +124,18 @@ def load_config() -> AppConfig:
     """Load application configuration"""
     config = AppConfig()
     
-    # Setup logging first
-    setup_logging(config)
+    # Note: Logging setup is now handled in app.py based on verbose flag
+    # setup_logging(config)
     
     logger = logging.getLogger(__name__)
-    logger.info("Configuration loaded")
+    # Only log if logging is already configured
+    if logger.hasHandlers():
+        logger.info("Configuration loaded")
     
     # Validate configuration
     if not config.validate_config():
-        logger.warning("Configuration validation failed. Some features may not work properly.")
+        if logger.hasHandlers():
+            logger.warning("Configuration validation failed. Some features may not work properly.")
     
     return config
 

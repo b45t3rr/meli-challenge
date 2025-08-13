@@ -4,6 +4,7 @@ from typing import Dict, Any, List
 import json
 from datetime import datetime
 
+from ..tools.database_tools import DatabaseUpdateTool, DatabaseCreateTool, DatabaseQueryTool
 import logging
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,9 @@ class TriageAgent:
     def __init__(self, llm: ChatOpenAI, language: str = "en"):
         self.llm = llm
         self.language = language
+        self.db_update_tool = DatabaseUpdateTool()
+        self.db_create_tool = DatabaseCreateTool()
+        self.db_query_tool = DatabaseQueryTool()
         self.agent = self._create_agent()
     
     def _create_agent(self) -> Agent:
@@ -48,7 +52,7 @@ class TriageAgent:
             """,
             verbose=True,
             allow_delegation=False,
-            tools=[],
+            tools=[self.db_update_tool, self.db_create_tool, self.db_query_tool],
             llm=self.llm,
             max_iter=5,
             memory=True
@@ -57,7 +61,9 @@ class TriageAgent:
     def triage_vulnerabilities(self, 
                              pdf_analysis: Dict = None, 
                              static_analysis: Dict = None, 
-                             dynamic_analysis: Dict = None) -> Dict[str, Any]:
+                             dynamic_analysis: Dict = None,
+                             db_manager=None,
+                             document_id=None) -> Dict[str, Any]:
         """Perform comprehensive triage of all vulnerability findings"""
         logger.info("Starting vulnerability triage process")
         
@@ -79,35 +85,114 @@ class TriageAgent:
             logger.error(f"Triage process failed: {e}")
             raise
     
-    def _extract_pdf_vulnerabilities(self, pdf_analysis: Dict) -> List[Dict]:
+    def _extract_pdf_vulnerabilities(self, pdf_analysis) -> List[Dict]:
         """Extract vulnerability information from PDF analysis"""
         if not pdf_analysis:
             return []
         
-        vulnerabilities = pdf_analysis.get('vulnerabilities', [])
-        logger.info(f"Extracted {len(vulnerabilities)} vulnerabilities from PDF analysis")
-        return vulnerabilities
+        # Handle both dict and string inputs
+        if isinstance(pdf_analysis, dict):
+            # Already a dictionary, extract vulnerabilities directly
+            vulnerabilities = pdf_analysis.get('vulnerabilities', [])
+            logger.info(f"Extracted {len(vulnerabilities)} vulnerabilities from PDF analysis")
+            return vulnerabilities
+        elif isinstance(pdf_analysis, str):
+            try:
+                pdf_analysis = json.loads(pdf_analysis)
+                vulnerabilities = pdf_analysis.get('vulnerabilities', [])
+                logger.info(f"Parsed and extracted {len(vulnerabilities)} vulnerabilities from PDF analysis string")
+                return vulnerabilities
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse PDF analysis as JSON: {pdf_analysis[:200]}...")
+                # Try to extract JSON from string using regex
+                import re
+                json_match = re.search(r'\{.*\}', pdf_analysis, re.DOTALL)
+                if json_match:
+                    try:
+                        pdf_analysis = json.loads(json_match.group())
+                        vulnerabilities = pdf_analysis.get('vulnerabilities', [])
+                        logger.info(f"Successfully extracted {len(vulnerabilities)} vulnerabilities from JSON in string")
+                        return vulnerabilities
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse extracted JSON from PDF analysis")
+                        return []
+                else:
+                    logger.warning("No JSON found in PDF analysis string")
+                    return []
+        else:
+            logger.warning(f"Unexpected PDF analysis type: {type(pdf_analysis)}")
+            return []
     
-    def _extract_static_results(self, static_analysis: Dict) -> Dict[str, Any]:
+    def _extract_static_results(self, static_analysis) -> Dict[str, Any]:
         """Extract results from static analysis"""
         if not static_analysis:
             return {"vulnerability_assessments": [], "additional_findings": []}
         
-        vuln_analysis = static_analysis.get('vulnerability_analysis', {})
-        assessments = vuln_analysis.get('vulnerability_assessments', [])
-        additional = vuln_analysis.get('additional_findings', [])
-        
-        logger.info(f"Extracted {len(assessments)} vulnerability assessments from static analysis")
+        # Handle both dict and string inputs
+        if isinstance(static_analysis, dict):
+            # Already a dictionary, extract data directly
+            vuln_analysis = static_analysis.get('vulnerability_analysis', {})
+            assessments = vuln_analysis.get('vulnerability_assessments', [])
+            additional = vuln_analysis.get('additional_findings', [])
+            logger.info(f"Extracted {len(assessments)} vulnerability assessments from static analysis")
+        elif isinstance(static_analysis, str):
+            try:
+                static_analysis = json.loads(static_analysis)
+                vuln_analysis = static_analysis.get('vulnerability_analysis', {})
+                assessments = vuln_analysis.get('vulnerability_assessments', [])
+                additional = vuln_analysis.get('additional_findings', [])
+                logger.info(f"Parsed and extracted {len(assessments)} vulnerability assessments from static analysis string")
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse static analysis as JSON: {static_analysis[:200]}...")
+                # Try to extract JSON from string using regex
+                import re
+                json_match = re.search(r'\{.*\}', static_analysis, re.DOTALL)
+                if json_match:
+                    try:
+                        static_analysis = json.loads(json_match.group())
+                        vuln_analysis = static_analysis.get('vulnerability_analysis', {})
+                        assessments = vuln_analysis.get('vulnerability_assessments', [])
+                        additional = vuln_analysis.get('additional_findings', [])
+                        logger.info(f"Successfully extracted {len(assessments)} vulnerability assessments from JSON in string")
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse extracted JSON from static analysis")
+                        return {"vulnerability_assessments": [], "additional_findings": []}
+                else:
+                    logger.warning("No JSON found in static analysis string")
+                    return {"vulnerability_assessments": [], "additional_findings": []}
+        else:
+            logger.warning(f"Unexpected static analysis type: {type(static_analysis)}")
+            return {"vulnerability_assessments": [], "additional_findings": []}
         return {
             "vulnerability_assessments": assessments,
             "additional_findings": additional,
             "semgrep_results": static_analysis.get('semgrep_results', {})
         }
     
-    def _extract_dynamic_results(self, dynamic_analysis: Dict) -> Dict[str, Any]:
+    def _extract_dynamic_results(self, dynamic_analysis) -> Dict[str, Any]:
         """Extract results from dynamic analysis"""
         if not dynamic_analysis:
             return {"vulnerability_tests": [], "general_tests": {}}
+        
+        # Handle both dict and string inputs
+        if isinstance(dynamic_analysis, str):
+            try:
+                dynamic_analysis = json.loads(dynamic_analysis)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse dynamic analysis as JSON: {dynamic_analysis[:200]}...")
+                # Try to extract JSON from string using regex
+                import re
+                json_match = re.search(r'\{.*\}', dynamic_analysis, re.DOTALL)
+                if json_match:
+                    try:
+                        dynamic_analysis = json.loads(json_match.group())
+                        logger.info("Successfully extracted JSON from dynamic analysis string")
+                    except json.JSONDecodeError:
+                        logger.warning("Failed to parse extracted JSON from dynamic analysis")
+                        return {"vulnerability_tests": [], "general_tests": {}}
+                else:
+                    logger.warning("No JSON found in dynamic analysis string")
+                    return {"vulnerability_tests": [], "general_tests": {}}
         
         vuln_tests = dynamic_analysis.get('vulnerability_tests', [])
         general_tests = dynamic_analysis.get('general_tests', {})
@@ -169,7 +254,7 @@ class TriageAgent:
            - Step-by-step proof of concept for exploitation
         
         REASONING: My decision criteria are:
-        - VULNERABLE: Dynamic testing confirms exploitation OR strong static evidence + dynamic indicators
+        - VULNERABLE: Dynamic testing confirms exploitation OR there is static evidence
         - POSSIBLE: Only static analysis finds issues without dynamic confirmation
         - NOT VULNERABLE: No credible evidence found in any analysis
         
@@ -200,19 +285,19 @@ class TriageAgent:
                     "final_status": "Vulnerable|Not Vulnerable",
                     "confidence_level": "High|Medium|Low",
                     "priority": "Critical|High|Medium|Low",
-                    "evidence_summary": {
+                    "evidence_summary": {{
                         "pdf_evidence": "string",
                         "static_evidence": "string",
                         "dynamic_evidence": "string"
-                    },
-                    "technical_evidence": {
+                    }},
+                    "technical_evidence": {{
                         "vulnerable_code_snippet": "string - exact code that contains the vulnerability",
                         "file_location": "string - file path and line numbers",
                         "http_request_example": "string - example HTTP request that exploits the vulnerability",
                         "http_response_example": "string - example HTTP response showing the vulnerability",
                         "exploitation_payload": "string - specific payload used to exploit",
                         "proof_of_concept": "string - step by step exploitation process"
-                    },
+                    }},
                     "correlation_analysis": "string",
                     "exploitability_assessment": "string",
                     "risk_rating": "string",
